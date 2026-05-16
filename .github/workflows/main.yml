@@ -1,0 +1,138 @@
+name: Rubika Uploader
+
+on:
+  workflow_dispatch:
+    inputs:
+      download_type:
+        description: 'نوع دانلود (url, file, cookies)'
+        required: true
+      download_source:
+        description: 'لینک، file_id یا cookies'
+        required: true
+      chat_id:
+        description: 'شناسه عددی چت تلگرام'
+        required: true
+      cookies_base64:
+        description: 'کوکی‌های base64 (اختیاری)'
+        required: false
+        default: ''
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install yt-dlp requests rubika
+
+      - name: Download and Upload to Rubika
+        env:
+          TYPE: ${{ github.event.inputs.download_type }}
+          SOURCE: ${{ github.event.inputs.download_source }}
+          CHAT_ID: ${{ github.event.inputs.chat_id }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          RUBIKA_AUTH: ${{ secrets.RUBIKA_AUTH }}
+          RUBIKA_KEY: ${{ secrets.RUBIKA_KEY }}
+          COOKIES_BASE64: ${{ github.event.inputs.cookies_base64 }}
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          #!/bin/bash
+
+          send_msg() {
+            curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${CHAT_ID}" -d "text=$1" > /dev/null
+          }
+
+          # ── مدیریت کوکی ──────────────────────────────
+          COOKIES_ARG=""
+          COOKIES_FILE="cookies.txt"
+
+          # اگر نوع درخواست فقط برای ذخیره‌سازی کوکی باشد
+          if [ "$TYPE" = "cookies" ]; then
+            if [ -n "$COOKIES_BASE64" ]; then
+              echo "$COOKIES_BASE64" | base64 -d > $COOKIES_FILE
+              send_msg "🍪 کوکی‌ها با موفقیت ذخیره شدند. حالا می‌توانید لینک دانلود را ارسال کنید."
+            else
+              send_msg "❌ فایل کوکی خالی است."
+            fi
+            exit 0
+          fi
+
+          # برای دانلودهای عادی، اولویت با base64 ارسالی (اگر موجود باشد) سپس Secret گیت‌هاب
+          if [ -n "$COOKIES_BASE64" ]; then
+            echo "$COOKIES_BASE64" | base64 -d > $COOKIES_FILE
+            COOKIES_ARG="--cookies $COOKIES_FILE"
+          elif [ -n "$YOUTUBE_COOKIES" ]; then
+            echo "$YOUTUBE_COOKIES" > $COOKIES_FILE
+            COOKIES_ARG="--cookies $COOKIES_FILE"
+          fi
+
+          send_msg "⏳ شروع دانلود..."
+
+          # ── دانلود ────────────────────────────────────
+          if [ "$TYPE" = "url" ]; then
+            if ! yt-dlp $COOKIES_ARG -o "downloaded_file.%(ext)s" --merge-output-format mkv --no-part "$SOURCE"; then
+              FILENAME=$(basename "$SOURCE")
+              curl -L -o "$FILENAME" "$SOURCE" || {
+                send_msg "❌ دانلود شکست خورد"
+                exit 1
+              }
+            else
+              FILENAME=$(ls downloaded_file.*)
+            fi
+          elif [ "$TYPE" = "file" ]; then
+            send_msg "📥 دریافت فایل تلگرام..."
+            FILE_INFO=$(curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${SOURCE}")
+            FILE_PATH=$(echo "$FILE_INFO" | jq -r '.result.file_path')
+            if [ "$FILE_PATH" = "null" ] || [ -z "$FILE_PATH" ]; then
+              send_msg "❌ خطا در دریافت اطلاعات فایل"
+              exit 1
+            fi
+            FILENAME=$(basename "$FILE_PATH")
+            curl -L -o "$FILENAME" "https://api.telegram.org/file/bot${BOT_TOKEN}/${FILE_PATH}" || {
+              send_msg "❌ دانلود فایل شکست خورد"
+              exit 1
+            }
+          else
+            send_msg "❌ نوع نامعتبر"
+            exit 1
+          fi
+
+          send_msg "📤 آپلود روی روبیکا..."
+
+          # ── آپلود به سیو مسیج روبیکا ─────────────────
+          python - <<EOF
+          import asyncio
+          from rubpy import Client
+          import os
+
+          async def main():
+              client = Client(
+                  auth=os.environ['RUBIKA_AUTH'],
+                  key=os.environ['RUBIKA_KEY'],
+                  platform='android',
+                  app_name='main'
+              )
+              await client.start()
+              await client.send_file('me', '$FILENAME', caption='✅ فایل آپلود شد')
+              print('UPLOAD_SUCCESS')
+
+          asyncio.run(main())
+          EOF
+
+          if [ $? -eq 0 ]; then
+            send_msg "✅ فایل با موفقیت در سیو مسیج روبیکا ذخیره شد"
+          else
+            send_msg "❌ آپلود روی روبیکا شکست خورد"
+          fi
+
+          # پاکسازی فایل دانلودی (کوکی حفظ می‌شود)
+          rm -f "$FILENAME"
