@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install yt-dlp requests rubika
+          pip install yt-dlp requests rubpy   # ← rubpy به‌جای rubika
 
       - name: Download and Upload to Rubika
         env:
@@ -55,7 +55,6 @@ jobs:
           COOKIES_ARG=""
           COOKIES_FILE="cookies.txt"
 
-          # اگر نوع درخواست فقط برای ذخیره‌سازی کوکی باشد
           if [ "$TYPE" = "cookies" ]; then
             if [ -n "$COOKIES_BASE64" ]; then
               echo "$COOKIES_BASE64" | base64 -d > $COOKIES_FILE
@@ -66,7 +65,7 @@ jobs:
             exit 0
           fi
 
-          # برای دانلودهای عادی، اولویت با base64 ارسالی (اگر موجود باشد) سپس Secret گیت‌هاب
+          # برای دانلودهای عادی، اولویت با base64 ارسالی سپس Secret
           if [ -n "$COOKIES_BASE64" ]; then
             echo "$COOKIES_BASE64" | base64 -d > $COOKIES_FILE
             COOKIES_ARG="--cookies $COOKIES_FILE"
@@ -78,15 +77,15 @@ jobs:
           send_msg "⏳ شروع دانلود..."
 
           # ── دانلود ────────────────────────────────────
+          DOWNLOAD_SUCCESS=false
           if [ "$TYPE" = "url" ]; then
-            if ! yt-dlp $COOKIES_ARG -o "downloaded_file.%(ext)s" --merge-output-format mkv --no-part "$SOURCE"; then
-              FILENAME=$(basename "$SOURCE")
-              curl -L -o "$FILENAME" "$SOURCE" || {
-                send_msg "❌ دانلود شکست خورد"
-                exit 1
-              }
-            else
+            if yt-dlp $COOKIES_ARG -o "downloaded_file.%(ext)s" --merge-output-format mkv --no-part "$SOURCE"; then
               FILENAME=$(ls downloaded_file.*)
+              DOWNLOAD_SUCCESS=true
+            else
+              # Fallback فقط برای فایل‌های مستقیم (نه یوتیوب)
+              FILENAME=$(basename "$SOURCE")
+              curl -L -o "$FILENAME" "$SOURCE" && DOWNLOAD_SUCCESS=true
             fi
           elif [ "$TYPE" = "file" ]; then
             send_msg "📥 دریافت فایل تلگرام..."
@@ -97,12 +96,11 @@ jobs:
               exit 1
             fi
             FILENAME=$(basename "$FILE_PATH")
-            curl -L -o "$FILENAME" "https://api.telegram.org/file/bot${BOT_TOKEN}/${FILE_PATH}" || {
-              send_msg "❌ دانلود فایل شکست خورد"
-              exit 1
-            }
-          else
-            send_msg "❌ نوع نامعتبر"
+            curl -L -o "$FILENAME" "https://api.telegram.org/file/bot${BOT_TOKEN}/${FILE_PATH}" && DOWNLOAD_SUCCESS=true
+          fi
+
+          if [ "$DOWNLOAD_SUCCESS" != true ]; then
+            send_msg "❌ دانلود شکست خورد (ممکن است نیاز به کوکی معتبر داشته باشید)"
             exit 1
           fi
 
@@ -122,7 +120,7 @@ jobs:
                   app_name='main'
               )
               await client.start()
-              await client.send_file('me', '$FILENAME', caption='✅ فایل آپلود شد')
+              await client.send_file('me', '${FILENAME}', caption='✅ فایل آپلود شد')
               print('UPLOAD_SUCCESS')
 
           asyncio.run(main())
@@ -134,5 +132,5 @@ jobs:
             send_msg "❌ آپلود روی روبیکا شکست خورد"
           fi
 
-          # پاکسازی فایل دانلودی (کوکی حفظ می‌شود)
-          rm -f "$FILENAME"
+          # پاکسازی
+          rm -f "$FILENAME" "$COOKIES_FILE"
