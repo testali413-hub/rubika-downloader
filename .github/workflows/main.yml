@@ -29,9 +29,14 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Install Node.js (for yt-dlp JS runtime)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
       - name: Install dependencies
         run: |
-          pip install yt-dlp requests rubpy   # ← rubpy به‌جای rubika
+          pip install yt-dlp requests rubpy
 
       - name: Download and Upload to Rubika
         env:
@@ -65,7 +70,6 @@ jobs:
             exit 0
           fi
 
-          # برای دانلودهای عادی، اولویت با base64 ارسالی سپس Secret
           if [ -n "$COOKIES_BASE64" ]; then
             echo "$COOKIES_BASE64" | base64 -d > $COOKIES_FILE
             COOKIES_ARG="--cookies $COOKIES_FILE"
@@ -79,11 +83,15 @@ jobs:
           # ── دانلود ────────────────────────────────────
           DOWNLOAD_SUCCESS=false
           if [ "$TYPE" = "url" ]; then
-            if yt-dlp $COOKIES_ARG -o "downloaded_file.%(ext)s" --merge-output-format mkv --no-part "$SOURCE"; then
+            # استفاده از Node.js به عنوان JS runtime برای حل چالش یوتیوب
+            if yt-dlp $COOKIES_ARG \
+                --js-runtimes node \
+                -o "downloaded_file.%(ext)s" \
+                --merge-output-format mkv \
+                --no-part "$SOURCE"; then
               FILENAME=$(ls downloaded_file.*)
               DOWNLOAD_SUCCESS=true
             else
-              # Fallback فقط برای فایل‌های مستقیم (نه یوتیوب)
               FILENAME=$(basename "$SOURCE")
               curl -L -o "$FILENAME" "$SOURCE" && DOWNLOAD_SUCCESS=true
             fi
@@ -100,7 +108,7 @@ jobs:
           fi
 
           if [ "$DOWNLOAD_SUCCESS" != true ]; then
-            send_msg "❌ دانلود شکست خورد (ممکن است نیاز به کوکی معتبر داشته باشید)"
+            send_msg "❌ دانلود شکست خورد"
             exit 1
           fi
 
@@ -116,9 +124,7 @@ jobs:
               client = Client(
                   name='rubika_session',
                   auth=os.environ['RUBIKA_AUTH'],
-                  private_key=os.environ['RUBIKA_KEY'],
-                  platform='android',
-                  app_name='main'
+                  private_key=os.environ['RUBIKA_KEY']
               )
               await client.start()
               await client.send_file('me', '${FILENAME}', caption='✅ فایل آپلود شد')
@@ -133,5 +139,4 @@ jobs:
             send_msg "❌ آپلود روی روبیکا شکست خورد"
           fi
 
-          # پاکسازی
           rm -f "$FILENAME" "$COOKIES_FILE"
