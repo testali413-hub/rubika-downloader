@@ -114,8 +114,9 @@ jobs:
 
           async def main():
               client = Client(
+                  name='rubika_session',
                   auth=os.environ['RUBIKA_AUTH'],
-                  key=os.environ['RUBIKA_KEY'],
+                  private_key=os.environ['RUBIKA_KEY'],
                   platform='android',
                   app_name='main'
               )
