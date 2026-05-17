@@ -45,7 +45,7 @@ jobs:
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           RUBIKA_AUTH: ${{ secrets.RUBIKA_AUTH }}
-          RUBIKA_KEY: ${{ secrets.RUBIKA_KEY }}
+          RUBIKA_KEY_RAW: ${{ secrets.RUBIKA_KEY_RAW }}
           COOKIES_BASE64: ${{ github.event.inputs.cookies_base64 }}
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
@@ -114,22 +114,46 @@ jobs:
 
           send_msg "📤 آپلود روی روبیکا..."
 
-          # آپلود با auth/private_key
+          # آپلود (با الگوریتم ترمیم خودکار کلید)
           python - <<EOF
-          import asyncio
+          import asyncio, os, sys, textwrap, traceback
           from rubpy import Client
-          import os
+
+          def repair_key(raw):
+              # حذف هدر و فوتر و هر چیز اضافی
+              key = raw.replace('-----BEGIN RSA PRIVATE KEY-----', '')
+              key = key.replace('-----END RSA PRIVATE KEY-----', '')
+              key = key.replace('-----BEGIN PRIVATE KEY-----', '')
+              key = key.replace('-----END PRIVATE KEY-----', '')
+              key = key.replace('\\n', '').replace('\n', '').replace(' ', '')
+              
+              if len(key) < 100:
+                  sys.exit(1)
+                  
+              # قالب‌بندی مجدد به خطوط ۶۴ کاراکتری
+              formatted = '\n'.join(textwrap.wrap(key, width=64))
+              return f"-----BEGIN RSA PRIVATE KEY-----\n{formatted}\n-----END RSA PRIVATE KEY-----"
+
+          auth = os.environ.get('RUBIKA_AUTH')
+          raw_key = os.environ.get('RUBIKA_KEY_RAW')
+          
+          private_key = repair_key(raw_key)
 
           async def main():
-              auth = os.environ['RUBIKA_AUTH']
-              private_key = os.environ['RUBIKA_KEY']
-              client = Client(name='rubika_session', auth=auth, private_key=private_key)
-              await client.start()
-              await client.send_file('me', '${FILENAME}', caption='✅ فایل آپلود شد')
-              print('UPLOAD_SUCCESS')
-              await client.disconnect()
+              try:
+                  client = Client(name='rubika_session', auth=auth, private_key=private_key)
+                  await client.start()
+                  await client.send_file('me', '${FILENAME}', caption='✅ فایل آپلود شد')
+                  print('UPLOAD_SUCCESS')
+                  await client.disconnect()
+                  return True
+              except Exception as e:
+                  print(f"ERROR: {e}")
+                  traceback.print_exc()
+                  return False
 
-          asyncio.run(main())
+          if not asyncio.run(main()):
+              sys.exit(1)
           EOF
 
           if [ $? -eq 0 ]; then
