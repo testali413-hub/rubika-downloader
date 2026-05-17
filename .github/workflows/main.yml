@@ -44,7 +44,8 @@ jobs:
           SOURCE: ${{ github.event.inputs.download_source }}
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          RUBIKA_SESSION: ${{ secrets.RUBIKA_SESSION }}
+          RUBIKA_AUTH: ${{ secrets.RUBIKA_AUTH }}
+          RUBIKA_KEY: ${{ secrets.RUBIKA_KEY }}
           COOKIES_BASE64: ${{ github.event.inputs.cookies_base64 }}
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
@@ -55,14 +56,14 @@ jobs:
               -d "chat_id=${CHAT_ID}" -d "text=$1" > /dev/null
           }
 
-          # ── مدیریت کوکی ──────────────────────────────
+          # مدیریت کوکی
           COOKIES_ARG=""
           COOKIES_FILE="cookies.txt"
 
           if [ "$TYPE" = "cookies" ]; then
             if [ -n "$COOKIES_BASE64" ]; then
               echo "$COOKIES_BASE64" | base64 -d > $COOKIES_FILE
-              send_msg "🍪 کوکی‌ها با موفقیت ذخیره شدند. حالا می‌توانید لینک دانلود را ارسال کنید."
+              send_msg "🍪 کوکی‌ها ذخیره شدند."
             else
               send_msg "❌ فایل کوکی خالی است."
             fi
@@ -79,7 +80,7 @@ jobs:
 
           send_msg "⏳ شروع دانلود..."
 
-          # ── دانلود ────────────────────────────────────
+          # دانلود
           DOWNLOAD_SUCCESS=false
           if [ "$TYPE" = "url" ]; then
             if yt-dlp $COOKIES_ARG \
@@ -113,23 +114,16 @@ jobs:
 
           send_msg "📤 آپلود روی روبیکا..."
 
-          # ── بازیابی Session و آپلود ─────────────────
+          # آپلود با auth/private_key
           python - <<EOF
           import asyncio
-          import base64
           from rubpy import Client
           import os
 
-          session_b64 = os.environ.get('RUBIKA_SESSION', '')
-          if not session_b64:
-              print('NO_SESSION')
-              exit(1)
-
-          with open('rubika_session.sqlite', 'wb') as f:
-              f.write(base64.b64decode(session_b64))
-
           async def main():
-              client = Client(name='rubika_session')
+              auth = os.environ['RUBIKA_AUTH']
+              private_key = os.environ['RUBIKA_KEY']
+              client = Client(name='rubika_session', auth=auth, private_key=private_key)
               await client.start()
               await client.send_file('me', '${FILENAME}', caption='✅ فایل آپلود شد')
               print('UPLOAD_SUCCESS')
@@ -139,9 +133,9 @@ jobs:
           EOF
 
           if [ $? -eq 0 ]; then
-            send_msg "✅ فایل با موفقیت در سیو مسیج روبیکا ذخیره شد"
+            send_msg "✅ فایل در سیو مسیج روبیکا ذخیره شد"
           else
             send_msg "❌ آپلود روی روبیکا شکست خورد"
           fi
 
-          rm -f "$FILENAME" "$COOKIES_FILE" rubika_session.sqlite
+          rm -f "$FILENAME" "$COOKIES_FILE"
